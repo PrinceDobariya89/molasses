@@ -72,10 +72,11 @@ class SmsService {
 
         if (Platform.isAndroid) {
           final cleanPhone = phone.replaceAll(RegExp(r'[^\d+]+'), '');
+          final String textToSend = recipient['customMessage'] ?? message;
           try {
             await Telephony.instance.sendSms(
               to: cleanPhone,
-              message: message,
+              message: textToSend,
             );
           } catch (e) {
             overallSuccess = false;
@@ -83,7 +84,8 @@ class SmsService {
           }
         } else {
           // Simulation for iOS / Web / Desktop
-          print('Simulating sending SMS to $name ($phone): $message');
+          final String textToSend = recipient['customMessage'] ?? message;
+          print('Simulating sending SMS to $name ($phone): $textToSend');
           // Hold for 1 second per contact to show progress in UI
           await Future.delayed(const Duration(milliseconds: 1000));
         }

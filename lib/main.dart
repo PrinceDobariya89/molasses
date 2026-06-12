@@ -10,13 +10,15 @@ import 'widgets/composer_sheet.dart';
 import 'widgets/queue_status_dialog.dart';
 import 'widgets/scheduled_list.dart';
 import 'widgets/history_list.dart';
+import 'widgets/groups_tab.dart';
+import 'models/broadcast_group.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
+
   // Initialize Background Scheduler
   await SchedulerService.initialize();
-  
+
   runApp(const MyApp());
 }
 
@@ -37,7 +39,10 @@ class MyApp extends StatelessWidget {
           surface: Colors.grey.shade50,
         ),
         textTheme: const TextTheme(
-          titleLarge: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 0.5),
+          titleLarge: TextStyle(
+            fontWeight: FontWeight.bold,
+            letterSpacing: 0.5,
+          ),
         ),
       ),
       home: const DashboardScreen(),
@@ -52,23 +57,25 @@ class DashboardScreen extends StatefulWidget {
   State<DashboardScreen> createState() => _DashboardScreenState();
 }
 
-class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProviderStateMixin {
+class _DashboardScreenState extends State<DashboardScreen>
+    with SingleTickerProviderStateMixin {
   late TabController _tabController;
-  
+
   // Data lists
   List<ContactModel> _contacts = [];
   List<ContactModel> _filteredContacts = [];
   List<SmsQueueItem> _scheduledItems = [];
   List<SmsQueueItem> _historyItems = [];
-  
+  List<BroadcastGroup> _groups = [];
+
   bool _isLoadingContacts = false;
   final TextEditingController _searchController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
-    
+    _tabController = TabController(length: 4, vsync: this);
+
     // Add tab listener to refresh data when switching tabs
     _tabController.addListener(() {
       if (_tabController.indexIsChanging) return;
@@ -112,11 +119,13 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
   Future<void> _loadStoredData() async {
     final scheduled = await StorageService.getScheduled();
     final history = await StorageService.getHistory();
+    final groups = await StorageService.getBroadcastGroups();
     setState(() {
       // Sort scheduled items by target time ascending
       scheduled.sort((a, b) => a.scheduledTime.compareTo(b.scheduledTime));
       _scheduledItems = scheduled;
       _historyItems = history;
+      _groups = groups;
     });
   }
 
@@ -146,6 +155,50 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
     });
   }
 
+  void _editContactAmount(ContactModel contact) {
+    final TextEditingController amountController = TextEditingController(
+      text: contact.outstandingAmount > 0
+          ? contact.outstandingAmount.toStringAsFixed(2)
+          : '',
+    );
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: Text('Edit Amount for ${contact.displayName}'),
+          content: TextField(
+            controller: amountController,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: const InputDecoration(
+              labelText: 'Outstanding Amount',
+              prefixText: '\$ ',
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () async {
+                final amount = double.tryParse(amountController.text);
+                if (amount != null) {
+                  // Save persistently
+                  await StorageService.saveCustomBalance(contact.id, amount);
+                  setState(() {
+                    contact.outstandingAmount = amount;
+                  });
+                  if (context.mounted) Navigator.pop(context);
+                }
+              },
+              child: const Text('Save'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   // Toggle Select All / Deselect All
   void _toggleSelectAll(bool selectAll) {
     setState(() {
@@ -159,20 +212,31 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
   int get _selectedCount => _contacts.where((c) => c.isSelected).length;
 
   // Selected contacts
-  List<ContactModel> get _selectedContacts => _contacts.where((c) => c.isSelected).toList();
+  List<ContactModel> get _selectedContacts =>
+      _contacts.where((c) => c.isSelected).toList();
 
   // Send message immediately
   Future<void> _sendNow(String message) async {
-    final List<Map<String, String>> recipients = _selectedContacts
-        .map((c) => {'name': c.displayName, 'phoneNumber': c.phoneNumber})
-        .toList();
+    final List<Map<String, String>> recipients = _selectedContacts.map((c) {
+      final String customMsg = message
+          .replaceAll('{name}', c.displayName)
+          .replaceAll('{amount}', c.formattedOutstandingAmount);
+      return {
+        'name': c.displayName,
+        'phoneNumber': c.phoneNumber,
+        'outstandingAmount': c.outstandingAmount.toString(),
+        'customMessage': customMsg,
+      };
+    }).toList();
 
     // 1. Create Progress Tracker
     final progressNotifier = ValueNotifier<QueueProgress>(
       QueueProgress(
         sentCount: 0,
         total: recipients.length,
-        currentRecipientName: recipients.isNotEmpty ? recipients[0]['name']! : '',
+        currentRecipientName: recipients.isNotEmpty
+            ? recipients[0]['name']!
+            : '',
         isCompleted: false,
       ),
     );
@@ -181,7 +245,8 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (context) => QueueStatusDialog(progressNotifier: progressNotifier),
+      builder: (context) =>
+          QueueStatusDialog(progressNotifier: progressNotifier),
     );
 
     // 3. Trigger immediate send
@@ -204,7 +269,9 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
       total: recipients.length,
       currentRecipientName: '',
       isCompleted: true,
-      errorMessage: campaign.status == SmsQueueStatus.failed ? campaign.errorMessage : null,
+      errorMessage: campaign.status == SmsQueueStatus.failed
+          ? campaign.errorMessage
+          : null,
     );
 
     // 5. Clean selection & reload
@@ -214,11 +281,20 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
 
   // Schedule message for background execution
   Future<void> _scheduleSms(String message, DateTime scheduledTime) async {
-    final List<Map<String, String>> recipients = _selectedContacts
-        .map((c) => {'name': c.displayName, 'phoneNumber': c.phoneNumber})
-        .toList();
+    final List<Map<String, String>> recipients = _selectedContacts.map((c) {
+      final String customMsg = message
+          .replaceAll('{name}', c.displayName)
+          .replaceAll('{amount}', c.formattedOutstandingAmount);
+      return {
+        'name': c.displayName,
+        'phoneNumber': c.phoneNumber,
+        'outstandingAmount': c.outstandingAmount.toString(),
+        'customMessage': customMsg,
+      };
+    }).toList();
 
-    final String campaignId = 'campaign_${DateTime.now().millisecondsSinceEpoch}';
+    final String campaignId =
+        'campaign_${DateTime.now().millisecondsSinceEpoch}';
 
     final SmsQueueItem item = SmsQueueItem(
       id: campaignId,
@@ -240,12 +316,16 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
             children: [
               const Icon(Icons.alarm_on, color: Colors.white),
               const SizedBox(width: 8),
-              Text('Scheduled campaign successfully for ${_formatDateTime(scheduledTime)}!'),
+              Text(
+                'Scheduled campaign successfully for ${_formatDateTime(scheduledTime)}!',
+              ),
             ],
           ),
           backgroundColor: Colors.indigo.shade600,
           behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
         ),
       );
 
@@ -310,10 +390,25 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
   }
 
   String _formatDateTime(DateTime dt) {
-    final months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    final months = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
     final String month = months[dt.month - 1];
     final String day = dt.day.toString().padLeft(2, '0');
-    final String hour = (dt.hour % 12 == 0 ? 12 : dt.hour % 12).toString().padLeft(2, '0');
+    final String hour = (dt.hour % 12 == 0 ? 12 : dt.hour % 12)
+        .toString()
+        .padLeft(2, '0');
     final String minute = dt.minute.toString().padLeft(2, '0');
     final String ampm = dt.hour >= 12 ? 'PM' : 'AM';
     return '$day $month, $hour:$minute $ampm';
@@ -321,7 +416,8 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
 
   @override
   Widget build(BuildContext context) {
-    final selectAll = _filteredContacts.isNotEmpty &&
+    final selectAll =
+        _filteredContacts.isNotEmpty &&
         _filteredContacts.every((c) => c.isSelected);
 
     return Scaffold(
@@ -348,7 +444,10 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
               children: [
                 // Top Header Row
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
@@ -379,11 +478,15 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                 ),
                 // Tab Navigation
                 TabBar(
+                  isScrollable: true,
                   controller: _tabController,
                   indicatorColor: Colors.cyanAccent,
                   labelColor: Colors.white,
                   unselectedLabelColor: Colors.white60,
-                  labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                  labelStyle: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
+                  ),
                   indicatorSize: TabBarIndicatorSize.tab,
                   indicatorWeight: 3.5,
                   dividerColor: Colors.transparent,
@@ -413,6 +516,16 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                               ),
                             ),
                           ],
+                        ],
+                      ),
+                    ),
+                    const Tab(
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.group, size: 16),
+                          SizedBox(width: 6),
+                          Text('Groups'),
                         ],
                       ),
                     ),
@@ -452,7 +565,10 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
               // Search & Select All controls
               Container(
                 color: Colors.white,
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
+                ),
                 child: Row(
                   children: [
                     Expanded(
@@ -468,10 +584,19 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                           onChanged: _filterContacts,
                           decoration: InputDecoration(
                             hintText: 'Search contacts by name or phone...',
-                            hintStyle: TextStyle(color: Colors.grey[400], fontSize: 13),
-                            prefixIcon: Icon(Icons.search, color: Colors.grey[400], size: 20),
+                            hintStyle: TextStyle(
+                              color: Colors.grey[400],
+                              fontSize: 13,
+                            ),
+                            prefixIcon: Icon(
+                              Icons.search,
+                              color: Colors.grey[400],
+                              size: 20,
+                            ),
                             border: InputBorder.none,
-                            contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                            contentPadding: const EdgeInsets.symmetric(
+                              vertical: 12,
+                            ),
                           ),
                         ),
                       ),
@@ -493,8 +618,13 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                         ),
                       ),
                       style: TextButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                        backgroundColor: Theme.of(context).colorScheme.primary.withOpacity(0.05),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
+                        backgroundColor: Theme.of(
+                          context,
+                        ).colorScheme.primary.withOpacity(0.05),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),
                         ),
@@ -508,64 +638,214 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                 child: _isLoadingContacts
                     ? const Center(child: CircularProgressIndicator())
                     : _filteredContacts.isEmpty
-                        ? Center(
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(Icons.people_outline, size: 64, color: Colors.grey[300]),
-                                const SizedBox(height: 16),
-                                Text(
-                                  _searchController.text.isNotEmpty
-                                      ? 'No matching contacts found'
-                                      : 'No contacts loaded',
-                                  style: TextStyle(color: Colors.grey[500], fontSize: 16),
-                                ),
-                              ],
+                    ? Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              Icons.people_outline,
+                              size: 64,
+                              color: Colors.grey[300],
                             ),
-                          )
-                        : ListView.builder(
-                            itemCount: _filteredContacts.length,
-                            padding: const EdgeInsets.symmetric(vertical: 8),
-                            itemBuilder: (context, index) {
-                              final contact = _filteredContacts[index];
-                              return ContactTile(
-                                contact: contact,
-                                onTap: () => _toggleContactSelection(index),
-                              );
-                            },
-                          ),
+                            const SizedBox(height: 16),
+                            Text(
+                              _searchController.text.isNotEmpty
+                                  ? 'No matching contacts found'
+                                  : 'No contacts loaded',
+                              style: TextStyle(
+                                color: Colors.grey[500],
+                                fontSize: 16,
+                              ),
+                            ),
+                          ],
+                        ),
+                      )
+                    : ListView.builder(
+                        itemCount: _filteredContacts.length,
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        itemBuilder: (context, index) {
+                          final contact = _filteredContacts[index];
+                          return ContactTile(
+                            contact: contact,
+                            onTap: () => _toggleContactSelection(index),
+                            onEditAmount: () => _editContactAmount(contact),
+                          );
+                        },
+                      ),
               ),
             ],
           ),
-          
-          // TAB 2: SCHEDULED LIST
-          ScheduledList(
-            items: _scheduledItems,
-            onCancel: _cancelScheduled,
+
+          // TAB 2: GROUPS LIST
+          GroupsTab(
+            groups: _groups,
+            allContacts: _contacts,
+            onSelectGroup: _selectGroup,
+            onDeleteGroup: _deleteGroup,
           ),
-          
-          // TAB 3: HISTORY LOGS
-          HistoryList(
-            items: _historyItems,
-          ),
+
+          // TAB 3: SCHEDULED LIST
+          ScheduledList(items: _scheduledItems, onCancel: _cancelScheduled),
+
+          // TAB 4: HISTORY LOGS
+          HistoryList(items: _historyItems),
         ],
       ),
-      // Compose floating action button
+      // Compose or Add Group floating action button
       floatingActionButton: AnimatedScale(
-        scale: _selectedCount > 0 && _tabController.index == 0 ? 1.0 : 0.0,
+        scale:
+            (_selectedCount > 0 && _tabController.index == 0) ||
+                (_tabController.index == 1)
+            ? 1.0
+            : 0.0,
         duration: const Duration(milliseconds: 250),
         child: FloatingActionButton.extended(
-          onPressed: _openComposerSheet,
+          onPressed: _tabController.index == 1
+              ? _showCreateGroupDialog
+              : _openComposerSheet,
           backgroundColor: Theme.of(context).colorScheme.secondary,
           foregroundColor: Colors.white,
           elevation: 6,
-          icon: const Icon(Icons.message),
+          icon: Icon(
+            _tabController.index == 1 ? Icons.group_add : Icons.message,
+          ),
           label: Text(
-            'Compose SMS ($_selectedCount)',
+            _tabController.index == 1
+                ? 'New Group'
+                : 'Compose SMS ($_selectedCount)',
             style: const TextStyle(fontWeight: FontWeight.bold),
           ),
         ),
       ),
+    );
+  }
+
+  void _selectGroup(BroadcastGroup group) {
+    setState(() {
+      for (var c in _contacts) {
+        c.isSelected = group.contactIds.contains(c.id);
+      }
+      _tabController.index = 0; // Switch to contacts tab
+    });
+    // Open composer sheet after brief delay to allow UI to update
+    Future.delayed(const Duration(milliseconds: 100), _openComposerSheet);
+  }
+
+  void _deleteGroup(String groupId) async {
+    await StorageService.removeBroadcastGroup(groupId);
+    _loadStoredData();
+  }
+
+  void _showCreateGroupDialog() {
+    final TextEditingController nameController = TextEditingController();
+
+    // Select contacts for the group
+    List<ContactModel> selectedForGroup = _contacts
+        .where((c) => c.isSelected)
+        .toList();
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: const Text('Create Broadcast Group'),
+              content: SizedBox(
+                width: double.maxFinite,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      controller: nameController,
+                      decoration: const InputDecoration(
+                        labelText: 'Group Name',
+                        hintText: 'e.g. VIP Customers',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Selected Contacts: ${selectedForGroup.length}',
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 8),
+                    Expanded(
+                      child: ListView.builder(
+                        shrinkWrap: true,
+                        itemCount: _contacts.length,
+                        itemBuilder: (context, index) {
+                          final contact = _contacts[index];
+                          final isSelected = selectedForGroup.contains(contact);
+                          return CheckboxListTile(
+                            title: Text(contact.displayName),
+                            subtitle: Text(contact.phoneNumber),
+                            value: isSelected,
+                            onChanged: (bool? value) {
+                              setDialogState(() {
+                                if (value == true) {
+                                  selectedForGroup.add(contact);
+                                } else {
+                                  selectedForGroup.remove(contact);
+                                }
+                              });
+                            },
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Cancel'),
+                ),
+                TextButton(
+                  onPressed: () async {
+                    if (nameController.text.trim().isEmpty) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Please enter a group name'),
+                        ),
+                      );
+                      return;
+                    }
+                    if (selectedForGroup.isEmpty) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Please select at least one contact'),
+                        ),
+                      );
+                      return;
+                    }
+
+                    final group = BroadcastGroup(
+                      id: DateTime.now().millisecondsSinceEpoch.toString(),
+                      name: nameController.text.trim(),
+                      contactIds: selectedForGroup.map((c) => c.id).toList(),
+                    );
+
+                    await StorageService.addBroadcastGroup(group);
+                    _loadStoredData();
+
+                    if (context.mounted) {
+                      Navigator.pop(context);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('Group "${group.name}" created'),
+                        ),
+                      );
+                    }
+                  },
+                  child: const Text('Create'),
+                ),
+              ],
+            );
+          },
+        );
+      },
     );
   }
 }

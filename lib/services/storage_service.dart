@@ -1,10 +1,39 @@
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/sms_queue_item.dart';
+import '../models/broadcast_group.dart';
 
 class StorageService {
   static const String _scheduledKey = 'scheduled_sms';
   static const String _historyKey = 'history_sms';
+  static const String _balancesKey = 'custom_balances';
+
+  // Fetch custom balances map
+  static Future<Map<String, double>> getCustomBalances() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final String? jsonStr = prefs.getString(_balancesKey);
+      if (jsonStr == null || jsonStr.isEmpty) return {};
+      final Map<String, dynamic> decoded = json.decode(jsonStr);
+      return decoded.map((key, value) => MapEntry(key, (value as num).toDouble()));
+    } catch (e) {
+      print('Error fetching custom balances: $e');
+      return {};
+    }
+  }
+
+  // Save/Update a custom balance for a contact
+  static Future<void> saveCustomBalance(String contactId, double balance) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final Map<String, double> currentBalances = await getCustomBalances();
+      currentBalances[contactId] = balance;
+      final String encoded = json.encode(currentBalances);
+      await prefs.setString(_balancesKey, encoded);
+    } catch (e) {
+      print('Error saving custom balance: $e');
+    }
+  }
 
   // Fetch scheduled items from storage
   static Future<List<SmsQueueItem>> getScheduled() async {
@@ -86,5 +115,39 @@ class StorageService {
       await saveScheduled(scheduled);
       await addHistory(item);
     }
+  }
+
+  // --- Broadcast Groups ---
+  static const String _groupsKey = 'broadcast_groups';
+
+  static Future<List<BroadcastGroup>> getBroadcastGroups() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final String? jsonStr = prefs.getString(_groupsKey);
+      if (jsonStr == null || jsonStr.isEmpty) return [];
+      final List decoded = json.decode(jsonStr);
+      return decoded.map((e) => BroadcastGroup.fromJson(e)).toList();
+    } catch (e) {
+      print('Error fetching broadcast groups: $e');
+      return [];
+    }
+  }
+
+  static Future<void> saveBroadcastGroups(List<BroadcastGroup> groups) async {
+    final prefs = await SharedPreferences.getInstance();
+    final String encoded = json.encode(groups.map((e) => e.toJson()).toList());
+    await prefs.setString(_groupsKey, encoded);
+  }
+
+  static Future<void> addBroadcastGroup(BroadcastGroup group) async {
+    final groups = await getBroadcastGroups();
+    groups.add(group);
+    await saveBroadcastGroups(groups);
+  }
+
+  static Future<void> removeBroadcastGroup(String id) async {
+    final groups = await getBroadcastGroups();
+    groups.removeWhere((g) => g.id == id);
+    await saveBroadcastGroups(groups);
   }
 }

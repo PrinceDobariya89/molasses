@@ -4,11 +4,13 @@ import '../models/contact_model.dart';
 class ContactTile extends StatelessWidget {
   final ContactModel contact;
   final VoidCallback onTap;
+  final VoidCallback onEditAmount;
 
   const ContactTile({
     super.key,
     required this.contact,
     required this.onTap,
+    required this.onEditAmount,
   });
 
   // Predefined harmonious gradients for contact avatars
@@ -109,6 +111,48 @@ class ContactTile extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 8),
+            // Outstanding Amount Badge
+            GestureDetector(
+              onTap: onEditAmount,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: contact.outstandingAmount > 0
+                      ? Colors.red.shade50
+                      : Colors.green.shade50,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: contact.outstandingAmount > 0
+                        ? Colors.red.shade100
+                        : Colors.green.shade100,
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      contact.formattedOutstandingAmount,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: contact.outstandingAmount > 0
+                            ? Colors.red.shade700
+                            : Colors.green.shade700,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    Icon(
+                      Icons.edit,
+                      size: 11,
+                      color: contact.outstandingAmount > 0
+                          ? Colors.red.shade400
+                          : Colors.green.shade400,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
             // Animated Selection Indicator
             AnimatedContainer(
               duration: const Duration(milliseconds: 200),

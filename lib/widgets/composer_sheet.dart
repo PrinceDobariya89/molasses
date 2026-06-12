@@ -25,11 +25,11 @@ class _ComposerSheetState extends State<ComposerSheet> {
   bool _isSchedulingMode = false;
 
   final List<String> _templates = [
-    "Hello! Just wanted to catch up. Hope you are doing well!",
-    "Important Update: Our meeting has been rescheduled to tomorrow at 10:00 AM.",
-    "Hey! Please check your email and send over the files. Thanks!",
+    "Dear {name}, this is a reminder that your outstanding balance is {amount}. Please settle it at your earliest convenience.",
+    "Hi {name}! Friendly check-in: your outstanding bill of {amount} is ready. Thank you!",
+    "Hello {name}, your payment of {amount} is now overdue. Please contact billing.",
+    "Hi {name}, hope you are doing well! Let me know when we can catch up.",
     "Urgent: Please call me back as soon as possible.",
-    "Happy Birthday! Wishing you a fantastic day ahead! 🎉",
   ];
 
   @override
@@ -41,7 +41,7 @@ class _ComposerSheetState extends State<ComposerSheet> {
   // Pick Date and Time for scheduling
   Future<void> _selectDateTime() async {
     final now = DateTime.now();
-    
+
     // 1. Pick Date
     final DateTime? pickedDate = await showDatePicker(
       context: context,
@@ -52,7 +52,9 @@ class _ComposerSheetState extends State<ComposerSheet> {
         return Theme(
           data: Theme.of(context).copyWith(
             colorScheme: ColorScheme.light(
-              primary: Theme.of(context).colorScheme.primary, // header background color
+              primary: Theme.of(
+                context,
+              ).colorScheme.primary, // header background color
               onPrimary: Colors.white, // header text color
               onSurface: Colors.black87, // body text color
             ),
@@ -68,7 +70,9 @@ class _ComposerSheetState extends State<ComposerSheet> {
     if (!mounted) return;
     final TimeOfDay? pickedTime = await showTimePicker(
       context: context,
-      initialTime: TimeOfDay.fromDateTime(_scheduledDateTime ?? now.add(const Duration(minutes: 10))),
+      initialTime: TimeOfDay.fromDateTime(
+        _scheduledDateTime ?? now.add(const Duration(minutes: 10)),
+      ),
     );
 
     if (pickedTime == null) return;
@@ -89,12 +93,24 @@ class _ComposerSheetState extends State<ComposerSheet> {
   // Format scheduled datetime for user display
   String _formatDateTime(DateTime dt) {
     final months = [
-      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
     ];
     final String month = months[dt.month - 1];
     final String day = dt.day.toString().padLeft(2, '0');
-    final String hour = (dt.hour % 12 == 0 ? 12 : dt.hour % 12).toString().padLeft(2, '0');
+    final String hour = (dt.hour % 12 == 0 ? 12 : dt.hour % 12)
+        .toString()
+        .padLeft(2, '0');
     final String minute = dt.minute.toString().padLeft(2, '0');
     final String ampm = dt.hour >= 12 ? 'PM' : 'AM';
     return '$day $month ${dt.year} at $hour:$minute $ampm';
@@ -107,9 +123,7 @@ class _ComposerSheetState extends State<ComposerSheet> {
     final int smsParts = (charCount / 160).ceil();
 
     return Padding(
-      padding: EdgeInsets.only(
-        bottom: MediaQuery.of(context).viewInsets.bottom,
-      ),
+      padding: EdgeInsets.only(bottom: MediaQuery.of(context).padding.bottom),
       child: Container(
         decoration: const BoxDecoration(
           color: Colors.white,
@@ -121,7 +135,7 @@ class _ComposerSheetState extends State<ComposerSheet> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Top drag indicator
+              // Drag indicator
               Center(
                 child: Container(
                   width: 40,
@@ -173,13 +187,15 @@ class _ComposerSheetState extends State<ComposerSheet> {
                           return Container(
                             margin: const EdgeInsets.only(right: 8),
                             child: InputChip(
-                              label: Text(c.displayName),
+                              label: Text(
+                                '${c.displayName} (${c.formattedOutstandingAmount})',
+                              ),
                               deleteIcon: const Icon(Icons.close, size: 14),
                               onDeleted: () => widget.onRemoveContact(c),
                               backgroundColor: Colors.grey[100],
                               deleteIconColor: Colors.grey[600],
                               labelStyle: const TextStyle(
-                                fontSize: 13,
+                                fontSize: 12,
                                 fontWeight: FontWeight.w500,
                                 color: Colors.black87,
                               ),
@@ -192,6 +208,37 @@ class _ComposerSheetState extends State<ComposerSheet> {
                       ),
               ),
               const SizedBox(height: 16),
+              // Template guide panel
+              Container(
+                margin: const EdgeInsets.only(bottom: 16),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.indigo.shade50,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: Colors.indigo.shade100),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.info_outline,
+                      color: Colors.indigo.shade800,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        'Customize message per recipient:\nUse {name} for contact name and {amount} for outstanding balance.',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.indigo.shade900,
+                          fontWeight: FontWeight.w500,
+                          height: 1.4,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
               // Message text area
               TextField(
                 controller: _messageController,
@@ -266,14 +313,20 @@ class _ComposerSheetState extends State<ComposerSheet> {
                           vertical: 8,
                         ),
                         decoration: BoxDecoration(
-                          color: Theme.of(context).colorScheme.primary.withOpacity(0.05),
+                          color: Theme.of(
+                            context,
+                          ).colorScheme.primary.withOpacity(0.05),
                           borderRadius: BorderRadius.circular(18),
                           border: Border.all(
-                            color: Theme.of(context).colorScheme.primary.withOpacity(0.15),
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.primary.withOpacity(0.15),
                           ),
                         ),
                         child: Text(
-                          temp.length > 25 ? '${temp.substring(0, 25)}...' : temp,
+                          temp.length > 25
+                              ? '${temp.substring(0, 25)}...'
+                              : temp,
                           style: TextStyle(
                             fontSize: 12,
                             fontWeight: FontWeight.w500,
@@ -341,7 +394,11 @@ class _ComposerSheetState extends State<ComposerSheet> {
                     ),
                     if (_isSchedulingMode)
                       IconButton(
-                        icon: const Icon(Icons.close, size: 18, color: Colors.redAccent),
+                        icon: const Icon(
+                          Icons.close,
+                          size: 18,
+                          color: Colors.redAccent,
+                        ),
                         onPressed: () {
                           setState(() {
                             _isSchedulingMode = false;
@@ -365,7 +422,8 @@ class _ComposerSheetState extends State<ComposerSheet> {
                 width: double.infinity,
                 height: 52,
                 child: ElevatedButton(
-                  onPressed: contacts.isEmpty || _messageController.text.trim().isEmpty
+                  onPressed:
+                      contacts.isEmpty || _messageController.text.trim().isEmpty
                       ? null
                       : () {
                           final msg = _messageController.text.trim();
@@ -395,7 +453,9 @@ class _ComposerSheetState extends State<ComposerSheet> {
                       ),
                       const SizedBox(width: 8),
                       Text(
-                        _isSchedulingMode ? 'Schedule Send' : 'Send Messages Now',
+                        _isSchedulingMode
+                            ? 'Schedule Send'
+                            : 'Send Messages Now',
                         style: const TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.bold,

@@ -52,11 +52,12 @@ void callbackDispatcher() {
             
             // Clean phone number for sending
             final cleanPhone = phone.replaceAll(RegExp(r'[^\d+]+'), '');
+            final String textToSend = recipient['customMessage'] ?? item.message;
 
             try {
               await Telephony.instance.sendSms(
                 to: cleanPhone,
-                message: item.message,
+                message: textToSend,
               );
             } catch (e) {
               overallSuccess = false;
@@ -68,8 +69,12 @@ void callbackDispatcher() {
       } else {
         // Simulation for iOS / Web / Desktop during background execution
         print('Direct sending is simulated on this platform.');
-        // Wait 1.5 seconds per recipient to simulate real network delay
-        for (final _ in item.recipients) {
+        for (final recipient in item.recipients) {
+          final String name = recipient['name'] ?? 'Unknown';
+          final String phone = recipient['phoneNumber'] ?? '';
+          final String textToSend = recipient['customMessage'] ?? item.message;
+          print('Simulated background send to $name ($phone): $textToSend');
+          // Wait 1.5 seconds per recipient to simulate real network delay
           await Future.delayed(const Duration(milliseconds: 1500));
         }
         overallSuccess = true;

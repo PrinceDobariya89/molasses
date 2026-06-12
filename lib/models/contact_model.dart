@@ -4,6 +4,7 @@ class ContactModel {
   final String phoneNumber;
   bool isSelected;
   final int colorIndex;
+  double outstandingAmount;
 
   ContactModel({
     required this.id,
@@ -11,6 +12,7 @@ class ContactModel {
     required this.phoneNumber,
     this.isSelected = false,
     required this.colorIndex,
+    required this.outstandingAmount,
   });
 
   String get initials {
@@ -22,12 +24,16 @@ class ContactModel {
     return parts[0][0].toUpperCase();
   }
 
+  String get formattedOutstandingAmount =>
+      '\$${outstandingAmount.toStringAsFixed(2)}';
+
   ContactModel copyWith({
     String? id,
     String? displayName,
     String? phoneNumber,
     bool? isSelected,
     int? colorIndex,
+    double? outstandingAmount,
   }) {
     return ContactModel(
       id: id ?? this.id,
@@ -35,6 +41,7 @@ class ContactModel {
       phoneNumber: phoneNumber ?? this.phoneNumber,
       isSelected: isSelected ?? this.isSelected,
       colorIndex: colorIndex ?? this.colorIndex,
+      outstandingAmount: outstandingAmount ?? this.outstandingAmount,
     );
   }
 
@@ -45,6 +52,7 @@ class ContactModel {
       'phoneNumber': phoneNumber,
       'isSelected': isSelected,
       'colorIndex': colorIndex,
+      'outstandingAmount': outstandingAmount,
     };
   }
 
@@ -55,6 +63,7 @@ class ContactModel {
       phoneNumber: json['phoneNumber'] as String,
       isSelected: json['isSelected'] as bool? ?? false,
       colorIndex: json['colorIndex'] as int? ?? 0,
+      outstandingAmount: (json['outstandingAmount'] as num? ?? 0.0).toDouble(),
     );
   }
 }
